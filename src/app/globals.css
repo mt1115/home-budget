@@ -29,5 +29,27 @@ body {
 
 button,
 input {
-  font: inherit;
+  font-family: inherit;
+}
+
+
+.range-thumb::-webkit-slider-thumb {
+  appearance: none;
+  pointer-events: auto;
+  width: 18px;
+  height: 18px;
+  border-radius: 9999px;
+  background: #047857;
+  border: 3px solid #ffffff;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.2);
+}
+
+.range-thumb::-moz-range-thumb {
+  pointer-events: auto;
+  width: 18px;
+  height: 18px;
+  border-radius: 9999px;
+  background: #047857;
+  border: 3px solid #ffffff;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.2);
 }
