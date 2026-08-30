@@ -40,11 +40,11 @@ export default function LoginPage() {
       <section className="w-full max-w-sm space-y-5 rounded-3xl border border-zinc-200 bg-white p-6 shadow-sm">
         <div>
           <p className="text-sm font-semibold text-emerald-700">Home Budget</p>
-          <h1 className="mt-2 text-2xl font-semibold text-zinc-900">????</h1>
+          <h1 className="mt-2 text-2xl font-semibold text-zinc-900">ログイン</h1>
         </div>
         <input className="h-12 w-full rounded-xl border border-zinc-200 px-3 outline-none focus:border-emerald-600" placeholder="email@example.com" value={email} onChange={(e) => setEmail(e.target.value)} />
         <input className="h-12 w-full rounded-xl border border-zinc-200 px-3 outline-none focus:border-emerald-600" type="password" placeholder="password" value={password} onChange={(e) => setPassword(e.target.value)} />
-        <button className="h-12 w-full rounded-xl bg-zinc-900 text-sm font-semibold text-white" onClick={signIn}>????</button>
+        <button className="h-12 w-full rounded-xl bg-zinc-900 text-sm font-semibold text-white" onClick={signIn}>ログイン</button>
         <p className="text-xs text-zinc-500">{message}</p>
       </section>
     </main>
