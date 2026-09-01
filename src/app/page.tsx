@@ -54,13 +54,15 @@ const label = {
   autoFromImage: "画像から自動入力",
   reading: "読み取り中",
   fromUrl: "URLから登録",
-  manual: "手入力で追加",
+  manual: "商品登録",
   edit: "編集",
   noItems: "該当なし",
   loginMissing: "ログイン未設定",
   login: "ログイン",
   logout: "ログアウト",
   delete: "削除",
+  addCategory: "カテゴリを追加",
+  categoryName: "カテゴリ名",
   requiredName: "商品名を入力してください",
   requiredCategory: "カテゴリを選択してください",
   invalidPrice: "価格は0以上の整数で入力してください",
@@ -80,6 +82,8 @@ export default function Home() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuMode, setMenuMode] = useState<MenuMode>("root");
   const [formOpen, setFormOpen] = useState(false);
+  const [categoryFormOpen, setCategoryFormOpen] = useState(false);
+  const [categoryName, setCategoryName] = useState("");
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -186,6 +190,22 @@ export default function Home() {
     setEditingProduct(null);
     setFormOpen(false);
   }
+  async function saveCategory() {
+    const name = categoryName.trim();
+    if (!name) return;
+    const nextId = crypto.randomUUID();
+    const sortOrder = categories.filter((category) => category.type === currentType).length;
+    const nextCategory: Category = { id: nextId, type: currentType, name, budgetAmount: 0, tags: [] };
+    if (supabase && householdId) {
+      const { error } = await supabase.from("categories").insert({ id: nextId, household_id: householdId, type: currentType, name, budget_amount: 0, sort_order: sortOrder });
+      if (error) { setDbError(`カテゴリ保存に失敗しました: ${error.message}`); return; }
+    }
+    setCategories((items) => [...items, nextCategory]);
+    setSelectedCategoryId(nextId);
+    setCategoryName("");
+    setCategoryFormOpen(false);
+  }
+
   async function deleteProduct(id: string) {
     if (supabase) {
       const { error } = await supabase.from("items").delete().eq("id", id);
@@ -213,11 +233,12 @@ export default function Home() {
         ) : view === "detail" ? (
           <ProductDetail product={selectedProduct} onBack={() => setView("items")} onFavorite={toggleFavorite} onEdit={(product) => { setEditingProduct(product); setFormOpen(true); }} onDelete={deleteProduct} />
         ) : (
-          <CategoryScreen title={tab === "appliances" ? label.appliances : label.furniture} categories={activeCategories} products={products} onCategory={(id) => { setSelectedCategoryId(id); setView("items"); setQuery(""); setMinPrice(0); setMaxPrice(500000); }} />
+          <CategoryScreen title={tab === "appliances" ? label.appliances : label.furniture} categories={activeCategories} products={products} onCategory={(id) => { setSelectedCategoryId(id); setView("items"); setQuery(""); setMinPrice(0); setMaxPrice(500000); }} onAddCategory={() => setCategoryFormOpen(true)} />
         )}
       </div>
       {tab !== "dashboard" && view !== "detail" ? <FloatingAdd onClick={() => setFormOpen(true)} /> : null}
       {formOpen ? <ProductForm categories={categories} currentType={currentType} initialCategoryId={selectedCategory?.id} product={editingProduct} allTags={Array.from(new Set([...categories.flatMap((category) => category.tags), ...products.flatMap((product) => product.tags)]))} onClose={() => { setEditingProduct(null); setFormOpen(false); }} onSave={saveProduct} /> : null}
+      {categoryFormOpen ? <CategoryForm value={categoryName} typeLabel={tab === "appliances" ? label.appliances : label.furniture} onChange={setCategoryName} onClose={() => { setCategoryName(""); setCategoryFormOpen(false); }} onSave={saveCategory} /> : null}
       <FooterNav tab={tab} onTabChange={switchTab} />
     </main>
   );
@@ -243,16 +264,20 @@ function persistedImageUrl(value: string) {
 
 async function normalizeUploadImage(file: File) {
   if (["image/jpeg", "image/png", "image/webp"].includes(file.type)) return file;
-  const dataUrl = await readFileAsDataUrl(file);
-  const image = await loadImage(dataUrl);
-  const canvas = document.createElement("canvas");
-  canvas.width = image.naturalWidth || image.width;
-  canvas.height = image.naturalHeight || image.height;
-  const context = canvas.getContext("2d");
-  if (!context) return file;
-  context.drawImage(image, 0, 0);
-  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.88));
-  return blob ? new File([blob], file.name.replace(/\.[^.]+$/, "") + ".jpg", { type: "image/jpeg" }) : file;
+  try {
+    const dataUrl = await readFileAsDataUrl(file);
+    const image = await loadImage(dataUrl);
+    const canvas = document.createElement("canvas");
+    canvas.width = image.naturalWidth || image.width;
+    canvas.height = image.naturalHeight || image.height;
+    const context = canvas.getContext("2d");
+    if (!context) return file;
+    context.drawImage(image, 0, 0);
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.88));
+    return blob ? new File([blob], (file.name || "product-image").replace(/\.[^.]+$/, "") + ".jpg", { type: "image/jpeg" }) : file;
+  } catch {
+    return file;
+  }
 }
 
 function readFileAsDataUrl(file: File) {
@@ -401,9 +426,13 @@ function HoverCard({ slice }: { slice: CategorySlice }) {
 }function Amount({ label, value, tone }: { label: string; value: string; tone?: "good" | "bad" }) { return <div className="rounded-2xl bg-zinc-50 p-4"><p className="mb-2 text-sm text-zinc-500">{label}</p><p className={`text-lg font-medium ${tone === "bad" ? "text-red-600" : tone === "good" ? "text-emerald-700" : "text-zinc-900"}`}>{value}</p></div>; }
 function MenuItem({ children, onClick }: { children: ReactNode; onClick: () => void }) { return <button className="w-full rounded-xl px-3 py-3 text-left text-sm font-bold hover:bg-lime-100/70 hover:text-emerald-700" onClick={onClick}>{children}</button>; }
 
-function CategoryScreen({ title, categories, products, onCategory }: { title: string; categories: Category[]; products: Product[]; onCategory: (id: string) => void }) {
-  return <section><Top title={title} searchOpen={false} onSearchOpen={() => undefined} hideSearch /><div className="space-y-1">{categories.map((category) => { const categoryProducts = products.filter((p) => p.categoryId === category.id); const count = categoryProducts.length; const total = categoryProducts.reduce((sum, item) => sum + item.price, 0); return <button key={category.id} className="w-full rounded-xl border-b border-zinc-100 px-2 py-5 text-left hover:bg-zinc-50" onClick={() => onCategory(category.id)}><div className="flex items-center justify-between"><div><p className="text-lg font-semibold">{category.name}</p><p className="mt-1 text-sm text-zinc-500">{count}件</p></div><p className="text-base font-semibold text-zinc-700">{yen(total)}</p></div><div className="mt-3 flex flex-wrap gap-2">{category.tags.map((tag) => <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-bold text-zinc-600" key={tag}>{tag}</span>)}</div></button>; })}</div></section>;
+function CategoryScreen({ title, categories, products, onCategory, onAddCategory }: { title: string; categories: Category[]; products: Product[]; onCategory: (id: string) => void; onAddCategory: () => void }) {
+  return <section><header className="mb-6 flex min-h-12 items-center justify-between"><h1 className="text-2xl font-semibold tracking-normal text-zinc-900">{title}</h1><button className="rounded-full border border-emerald-700 px-3 py-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-50" onClick={onAddCategory}>{label.addCategory}</button></header><div className="space-y-1">{categories.map((category) => { const categoryProducts = products.filter((p) => p.categoryId === category.id); const count = categoryProducts.length; const total = categoryProducts.reduce((sum, item) => sum + item.price, 0); return <button key={category.id} className="w-full rounded-xl border-b border-zinc-100 px-2 py-5 text-left hover:bg-zinc-50" onClick={() => onCategory(category.id)}><div className="flex items-center justify-between"><div><p className="text-lg font-semibold">{category.name}</p><p className="mt-1 text-sm text-zinc-500">{count}件</p></div><p className="text-base font-semibold text-zinc-700">{yen(total)}</p></div><div className="mt-3 flex flex-wrap gap-2">{category.tags.map((tag) => <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-bold text-zinc-600" key={tag}>{tag}</span>)}</div></button>; })}</div></section>;
 }
+function CategoryForm({ value, typeLabel, onChange, onClose, onSave }: { value: string; typeLabel: string; onChange: (value: string) => void; onClose: () => void; onSave: () => void | Promise<void> }) {
+  return <div className="fixed inset-0 z-50 bg-black/20 px-5 py-8" onClick={onClose}><div className="mx-auto w-full max-w-sm rounded-3xl bg-white p-5 shadow-2xl" onClick={(event) => event.stopPropagation()}><div className="mb-4 flex items-center justify-between"><h2 className="text-lg font-semibold">{typeLabel}カテゴリを追加</h2><button className="grid h-9 w-9 place-items-center rounded-full hover:bg-zinc-100" onClick={onClose}><X size={20} /></button></div><input className="h-11 w-full rounded-xl border border-zinc-200 px-3 outline-none focus:border-emerald-600" placeholder={label.categoryName} value={value} maxLength={40} onChange={(event) => onChange(event.target.value)} /><button className="mt-4 h-11 w-full rounded-xl bg-zinc-900 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-40" disabled={!value.trim()} onClick={onSave}>追加</button></div></div>;
+}
+
 function ProductList({ category, items, query, minPrice, maxPrice, searchOpen, onBack, onDetail, onFavorite, onDelete, onQuery, onSearchOpen, onMinPrice, onMaxPrice }: { category?: Category; items: Product[]; query: string; minPrice: number; maxPrice: number; searchOpen: boolean; onBack: () => void; onDetail: (id: string) => void; onFavorite: (id: string) => void; onDelete: (id: string) => void; onQuery: (v: string) => void; onSearchOpen: (v: boolean) => void; onMinPrice: (v: number) => void; onMaxPrice: (v: number) => void }) {
   const tags = Array.from(new Set(items.flatMap((item) => item.tags)));
   return <section><Top title={category?.name ?? ""} back={onBack} searchOpen={searchOpen} onSearchOpen={onSearchOpen} />{searchOpen ? <SearchPanel query={query} minPrice={minPrice} maxPrice={maxPrice} tags={tags} onQuery={onQuery} onMinPrice={onMinPrice} onMaxPrice={onMaxPrice} /> : null}<div className="space-y-3">{items.length ? items.map((item) => <ProductRow key={item.id} item={item} onClick={() => onDetail(item.id)} onFavorite={onFavorite} onDelete={onDelete} />) : <p className="py-10 text-center text-zinc-500">{label.noItems}</p>}</div></section>;
@@ -423,15 +452,22 @@ function DualRange({ min, max, onMin, onMax }: { min: number; max: number; onMin
 }
 
 function ProductRow({ item, onClick, onFavorite, onDelete }: { item: Product; onClick: () => void; onFavorite: (id: string) => void; onDelete: (id: string) => void }) {
-  return <div role="button" tabIndex={0} className="flex w-full cursor-pointer gap-3 rounded-xl border-b border-zinc-100 px-2 py-4 text-left hover:bg-zinc-50" onClick={onClick} onKeyDown={(event) => { if (event.key === "Enter") onClick(); }}><img src={item.image} alt="" className="h-18 w-18 rounded-2xl object-cover bg-zinc-100" /><div className="min-w-0 flex-1"><div className="flex items-start justify-between gap-2"><div><p className="font-semibold leading-snug">{item.name}</p><p className="mt-1 text-sm text-zinc-500">{item.maker}</p></div><div className="flex shrink-0 gap-1"><button aria-label="select" className="grid h-9 w-9 place-items-center rounded-full hover:bg-lime-100/70" onClick={(event) => { event.stopPropagation(); onFavorite(item.id); }}><Heart size={20} className={item.selected ? "fill-emerald-600 text-emerald-600" : "text-zinc-400"} /></button><button aria-label="delete" className="grid h-9 w-9 place-items-center rounded-full text-zinc-400 hover:bg-red-50 hover:text-red-600" onClick={(event) => { event.stopPropagation(); onDelete(item.id); }}><Trash2 size={18} /></button></div></div><div className="mt-2 flex flex-wrap gap-1">{item.tags.slice(0, 3).map((tag) => <span className="rounded-full bg-zinc-100 px-2 py-1 text-[11px] font-bold text-zinc-600" key={tag}>{tag}</span>)}</div></div><p className="self-center whitespace-nowrap text-base font-semibold text-emerald-700">{yen(item.price)}</p></div>;
-}
-function ProductDetail({ product, onBack, onFavorite, onEdit, onDelete }: { product?: Product; onBack: () => void; onFavorite: (id: string) => void; onEdit: (product: Product) => void; onDelete: (id: string) => void }) {
+  return <div role="button" tabIndex={0} className="grid w-full cursor-pointer grid-cols-[72px_1fr_76px] gap-3 rounded-xl border-b border-zinc-100 px-2 py-4 text-left hover:bg-zinc-50" onClick={onClick} onKeyDown={(event) => { if (event.key === "Enter") onClick(); }}><img src={item.image} alt="" className="h-18 w-18 rounded-2xl object-cover bg-zinc-100" /><div className="min-w-0"><p className="font-semibold leading-snug">{item.name}</p><p className="mt-1 text-sm text-zinc-500">{item.maker}</p><div className="mt-2 flex flex-wrap gap-1">{item.tags.slice(0, 3).map((tag) => <span className="rounded-full bg-zinc-100 px-2 py-1 text-[11px] font-bold text-zinc-600" key={tag}>{tag}</span>)}</div></div><div className="flex h-full flex-col items-end justify-between"><div className="flex gap-1"><button aria-label="select" className="grid h-9 w-9 place-items-center rounded-full hover:bg-lime-100/70" onClick={(event) => { event.stopPropagation(); onFavorite(item.id); }}><Heart size={20} className={item.selected ? "fill-emerald-600 text-emerald-600" : "text-zinc-400"} /></button><button aria-label="delete" className="grid h-9 w-9 place-items-center rounded-full text-zinc-400 hover:bg-red-50 hover:text-red-600" onClick={(event) => { event.stopPropagation(); onDelete(item.id); }}><Trash2 size={18} /></button></div><p className="whitespace-nowrap text-base font-semibold text-emerald-700">{yen(item.price)}</p></div></div>;
+}function ProductDetail({ product, onBack, onFavorite, onEdit, onDelete }: { product?: Product; onBack: () => void; onFavorite: (id: string) => void; onEdit: (product: Product) => void; onDelete: (id: string) => void }) {
   if (!product) return null;
   const rows = [[label.maker, product.maker], [label.model, product.model], [label.price, yen(product.price)], [label.shop, product.shop], [label.memo, product.memo]];
   return <section><header className="mb-5 flex items-center justify-between"><button className="grid h-10 w-10 place-items-center rounded-full hover:bg-zinc-100" onClick={onBack}><ChevronLeft size={24} /></button><div className="flex gap-1"><button aria-label="favorite" className="grid h-10 w-10 place-items-center rounded-full hover:bg-lime-100/70" onClick={() => onFavorite(product.id)}><Heart size={22} className={product.selected ? "fill-emerald-600 text-emerald-600" : "text-zinc-400"} /></button><button aria-label="delete" className="grid h-10 w-10 place-items-center rounded-full text-zinc-400 hover:bg-red-50 hover:text-red-600" onClick={() => onDelete(product.id)}><Trash2 size={19} /></button></div></header><h1 className="mb-4 text-2xl font-semibold tracking-normal text-zinc-900">{product.name}</h1><img src={product.image} alt="" className="mb-5 h-48 w-full rounded-3xl object-cover bg-zinc-100" /><div className="space-y-3">{rows.map(([key, value]) => <div key={key} className="border-b border-zinc-100 pb-3"><p className="text-xs font-semibold text-zinc-400">{key}</p><p className="mt-1 break-all font-medium">{value}</p></div>)}<div className="border-b border-zinc-100 pb-3"><p className="text-xs font-semibold text-zinc-400">URL</p>{product.url ? <a className="mt-1 block break-all font-medium text-emerald-700 underline underline-offset-2" href={product.url} target="_blank" rel="noreferrer">{product.url}</a> : <p className="mt-1 text-zinc-400">未登録</p>}</div><div className="flex flex-wrap gap-2 pt-2">{product.tags.map((tag) => <span key={tag} className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700">{tag}</span>)}</div></div><button className="mt-8 flex h-11 w-full items-center justify-center gap-2 rounded-xl bg-zinc-900 text-sm font-semibold text-white hover:bg-emerald-700" onClick={() => onEdit(product)}><Edit3 size={17} />{label.edit}</button></section>;
 }
 
 
+function ReadingDots() {
+  const [count, setCount] = useState(1);
+  useEffect(() => {
+    const timer = window.setInterval(() => setCount((current) => current >= 3 ? 1 : current + 1), 450);
+    return () => window.clearInterval(timer);
+  }, []);
+  return <span className="inline-block w-24 whitespace-nowrap text-center">読み取り中<span className="inline-block w-4 text-left">{".".repeat(count)}</span></span>;
+}
 function ProductForm({ categories, currentType, initialCategoryId, product, allTags, onClose, onSave }: { categories: Category[]; currentType: CategoryType; initialCategoryId?: string; product: Product | null; allTags: string[]; onClose: () => void; onSave: (draft: ProductDraft) => void | Promise<void> }) {
   const availableCategories = categories.filter((category) => category.type === currentType);
   const [categoryId, setCategoryId] = useState(product?.categoryId ?? initialCategoryId ?? availableCategories[0]?.id ?? "");
@@ -479,10 +515,10 @@ function ProductForm({ categories, currentType, initialCategoryId, product, allT
   async function fillFromImage(file: File) {
     setReading(true);
     setReadError("");
-    const uploadFile = await normalizeUploadImage(file);
-    const form = new FormData();
-    form.append("image", uploadFile, uploadFile.name || "product-image.jpg");
     try {
+      const uploadFile = await normalizeUploadImage(file);
+      const form = new FormData();
+      form.append("image", uploadFile, uploadFile.name || "product-image.jpg");
       const response = await fetch("/api/product-image", { method: "POST", body: form });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "画像を読み取れませんでした");
@@ -503,7 +539,7 @@ function ProductForm({ categories, currentType, initialCategoryId, product, allT
     const imageForSave = persistedImageUrl(image) || "https://images.unsplash.com/photo-1556228453-efd6c1ff04f6?w=300&auto=format&fit=crop";
     await onSave({ categoryId, name: name.trim(), maker, model, price: priceNumber, url, shop, image: imageForSave, tags, memo, selected, favorite: selected });
   }
-  return <div className="fixed inset-0 z-50 bg-black/20 px-5 py-8" onClick={onClose}><form className="mx-auto max-h-[calc(100vh-4rem)] w-full max-w-sm space-y-3 overflow-y-auto rounded-3xl bg-white p-5 [scrollbar-gutter:stable] shadow-2xl" onClick={(e) => e.stopPropagation()} onSubmit={submit}><div className="mb-2 flex items-center justify-between"><h2 className="text-lg font-semibold">{product ? label.editProduct : label.manual}</h2><button type="button" className="grid h-9 w-9 place-items-center rounded-full hover:bg-zinc-100" onClick={onClose}><X size={20} /></button></div><label className="flex cursor-pointer items-center justify-center gap-2 rounded-2xl border border-dashed border-emerald-700 px-4 py-4 text-sm font-semibold text-emerald-700 hover:bg-emerald-50"><ImagePlus size={18} />{label.autoFromImage}<input className="hidden" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" onChange={(e) => { const file = e.target.files?.[0]; if (file) void fillFromImage(file); }} /></label><select className="h-11 w-full rounded-xl border border-zinc-200 px-3" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>{availableCategories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select><Field placeholder={label.productName} value={name} onChange={setName} /><Field placeholder={label.maker} value={maker} onChange={setMaker} /><Field placeholder={label.model} value={model} onChange={setModel} /><PriceField value={price} onChange={setPrice} /><div className="flex gap-2"><Field placeholder="URL" value={url} onChange={setUrl} /><button type="button" className="h-11 shrink-0 rounded-xl border border-emerald-700 px-3 text-xs font-semibold text-emerald-700 hover:bg-emerald-50" onClick={fillFromUrl}>{reading ? label.reading : label.autoFromUrl}</button></div><Field placeholder={label.shop} value={shop} onChange={setShop} /><Field placeholder={label.imageUrl} value={persistedImageUrl(image)} onChange={setImage} />{readError ? <p className="rounded-xl bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">{readError}</p> : null}<div className="space-y-2"><select className="h-11 w-full rounded-xl border border-zinc-200 px-3 text-sm" value={tagSelect} onChange={(e) => { addTag(e.target.value); setTagSelect(""); }}><option value="">{label.tagCsv}</option>{tagOptions.map((tag) => <option key={tag} value={tag}>{tag}</option>)}</select>{addingTag ? <div className="flex gap-2"><input className="h-10 min-w-0 flex-1 rounded-xl border border-zinc-200 px-3 text-sm outline-none focus:border-emerald-600" placeholder={label.newTag} value={newTag} onChange={(e) => setNewTag(e.target.value)} /><button type="button" className="rounded-xl bg-zinc-900 px-3 text-xs font-semibold text-white" onClick={() => { addTag(newTag.trim()); setNewTag(""); setAddingTag(false); }}>{label.addTag}</button></div> : <button type="button" className="inline-flex h-8 items-center rounded-full border border-emerald-700 px-3 text-xs font-semibold text-emerald-700 hover:bg-emerald-50" onClick={() => setAddingTag(true)}>{label.addTag}</button>}<div className="flex flex-wrap gap-2">{tags.map((tag) => <button type="button" key={tag} className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700" onClick={() => setTags((current) => current.filter((item) => item !== tag))}>{tag}<span className="ml-1">x</span></button>)}</div></div><textarea className="min-h-20 w-full rounded-xl border border-zinc-200 px-3 py-2 outline-none focus:border-emerald-600" placeholder={label.memo} value={memo} onChange={(e) => setMemo(e.target.value)} /><label className="flex items-center gap-2 text-sm font-semibold text-zinc-600"><input type="checkbox" checked={selected} onChange={(e) => setSelected(e.target.checked)} />{label.markSelected}</label><button className="h-11 w-full rounded-xl bg-zinc-900 text-sm font-semibold text-white hover:bg-emerald-700">{label.save}</button></form></div>;
+  return <div className="fixed inset-0 z-50 bg-black/20 px-5 py-8" onClick={onClose}><form className="mx-auto max-h-[calc(100vh-4rem)] w-full max-w-sm space-y-3 overflow-y-auto rounded-3xl bg-white p-5 pb-24 [scrollbar-gutter:stable] shadow-2xl" onClick={(e) => e.stopPropagation()} onSubmit={submit}><div className="mb-2 flex items-center justify-between"><h2 className="text-lg font-semibold">{product ? label.editProduct : label.manual}</h2><button type="button" className="grid h-9 w-9 place-items-center rounded-full hover:bg-zinc-100" onClick={onClose}><X size={20} /></button></div><label className="flex cursor-pointer items-center justify-center gap-2 rounded-2xl border border-dashed border-emerald-700 px-4 py-4 text-sm font-semibold text-emerald-700 hover:bg-emerald-50"><ImagePlus size={18} />{label.autoFromImage}<input className="hidden" type="file" accept="image/*" onChange={(e) => { const file = e.target.files?.[0]; if (file) void fillFromImage(file); }} /></label><select className="h-11 w-full rounded-xl border border-zinc-200 px-3" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>{availableCategories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select><Field placeholder={label.productName} value={name} onChange={setName} /><Field placeholder={label.maker} value={maker} onChange={setMaker} /><Field placeholder={label.model} value={model} onChange={setModel} /><PriceField value={price} onChange={setPrice} /><div className="flex gap-2"><Field placeholder="URL" value={url} onChange={setUrl} /><button type="button" className="h-11 w-30 shrink-0 rounded-xl border border-emerald-700 px-2 text-xs font-semibold text-emerald-700 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-40" disabled={reading} onClick={fillFromUrl}>{reading ? <ReadingDots /> : label.autoFromUrl}</button></div><Field placeholder={label.shop} value={shop} onChange={setShop} /><Field placeholder={label.imageUrl} value={persistedImageUrl(image)} onChange={setImage} />{readError ? <p className="rounded-xl bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">{readError}</p> : null}<div className="space-y-2"><select className="h-11 w-full rounded-xl border border-zinc-200 px-3 text-sm" value={tagSelect} onChange={(e) => { addTag(e.target.value); setTagSelect(""); }}><option value="">{label.tagCsv}</option>{tagOptions.map((tag) => <option key={tag} value={tag}>{tag}</option>)}</select>{addingTag ? <div className="flex gap-2"><input className="h-10 min-w-0 flex-1 rounded-xl border border-zinc-200 px-3 text-sm outline-none focus:border-emerald-600" placeholder={label.newTag} value={newTag} onChange={(e) => setNewTag(e.target.value)} /><button type="button" className="rounded-xl bg-zinc-900 px-3 text-xs font-semibold text-white" onClick={() => { addTag(newTag.trim()); setNewTag(""); setAddingTag(false); }}>{label.addTag}</button></div> : <button type="button" className="inline-flex h-8 items-center rounded-full border border-emerald-700 px-3 text-xs font-semibold text-emerald-700 hover:bg-emerald-50" onClick={() => setAddingTag(true)}>{label.addTag}</button>}<div className="flex flex-wrap gap-2">{tags.map((tag) => <button type="button" key={tag} className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700" onClick={() => setTags((current) => current.filter((item) => item !== tag))}>{tag}<span className="ml-1">x</span></button>)}</div></div><textarea className="min-h-20 w-full rounded-xl border border-zinc-200 px-3 py-2 outline-none focus:border-emerald-600" placeholder={label.memo} value={memo} onChange={(e) => setMemo(e.target.value)} /><label className="flex items-center gap-2 text-sm font-semibold text-zinc-600"><input type="checkbox" checked={selected} onChange={(e) => setSelected(e.target.checked)} />{label.markSelected}</label><button className="h-11 w-full rounded-xl bg-zinc-900 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-40" disabled={reading}>{reading ? <ReadingDots /> : label.save}</button></form></div>;
 }
 function Field({ placeholder, value, onChange, inputMode }: { placeholder: string; value: string; onChange: (value: string) => void; inputMode?: "numeric" }) { return <input className="h-11 w-full rounded-xl border border-zinc-200 px-3 outline-none focus:border-emerald-600" placeholder={placeholder} value={value} inputMode={inputMode} onChange={(e) => onChange(e.target.value)} />; }
 function PriceField({ value, onChange }: { value: string; onChange: (value: string) => void }) { return <div className="flex h-11 items-center rounded-xl border border-zinc-200 bg-white px-3 focus-within:border-emerald-600"><input className="min-w-0 flex-1 outline-none" placeholder={label.price} value={value} inputMode="numeric" onChange={(e) => onChange(e.target.value)} /><span className="ml-2 text-sm font-semibold text-zinc-500">円</span></div>; }
@@ -511,6 +547,10 @@ function PriceField({ value, onChange }: { value: string; onChange: (value: stri
 function FloatingAdd({ onClick }: { onClick: () => void }) { return <div className="fixed inset-x-0 bottom-23 z-30 mx-auto flex w-full max-w-sm justify-end px-7"><button aria-label="add" className="grid h-15 w-15 place-items-center rounded-full bg-zinc-900 text-white shadow-xl hover:bg-emerald-700" onClick={(e) => { e.stopPropagation(); onClick(); }}><Plus size={30} /></button></div>; }
 function FooterNav({ tab, onTabChange }: { tab: Tab; onTabChange: (tab: Tab) => void }) { return <nav className="fixed inset-x-0 bottom-0 z-20 mx-auto max-w-sm border-t border-zinc-200 bg-white/95 px-7 pb-5 pt-2 backdrop-blur"><div className="grid grid-cols-3"><TabButton active={tab === "dashboard"} icon={<BarChart3 size={20} />} onClick={() => onTabChange("dashboard")}>{label.dashboard}</TabButton><TabButton active={tab === "appliances"} icon={<Refrigerator size={20} />} onClick={() => onTabChange("appliances")}>{label.appliances}</TabButton><TabButton active={tab === "furniture"} icon={<Armchair size={20} />} onClick={() => onTabChange("furniture")}>{label.furniture}</TabButton></div></nav>; }
 function TabButton({ active, children, icon, onClick }: { active: boolean; children: ReactNode; icon: ReactNode; onClick: () => void }) { return <button className={`flex h-14 flex-col items-center justify-center gap-1 px-1 text-[0.65rem] leading-none font-semibold transition-colors hover:bg-lime-100/70 hover:text-emerald-700 rounded-xl whitespace-nowrap ${active ? "text-emerald-700" : "text-zinc-500"}`} onClick={onClick}>{icon}<span className="leading-none">{children}</span></button>; }
+
+
+
+
 
 
 
