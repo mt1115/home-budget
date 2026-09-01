@@ -36,7 +36,7 @@ export async function POST(request: NextRequest) {
 
 async function uploadDifyFile(file: File) {
   const uploadForm = new FormData();
-  uploadForm.append("file", file, file.name || "product-image.jpg");
+  uploadForm.append("file", file, "product-image.jpg");
   uploadForm.append("user", DIFY_USER);
 
   const response = await fetch(`${DIFY_BASE_URL}/files/upload`, {
@@ -45,7 +45,7 @@ async function uploadDifyFile(file: File) {
     body: uploadForm,
   });
   const data = await response.json();
-  if (!response.ok || !data.id) throw new Error(data.message ?? "Difyへの画像アップロードに失敗しました");
+  if (!response.ok || !data.id) throw new Error(data.message ? `Difyアップロード失敗: ${data.message}` : "Difyへの画像アップロードに失敗しました");
   return data.id as string;
 }
 
@@ -204,6 +204,7 @@ function guessModel(text: string) { return text.match(/\b[A-Z]{1,5}[-_ ]?[A-Z0-9
 function stringValue(value: unknown) { return typeof value === "string" || typeof value === "number" ? String(value).trim() : ""; }
 function toPrice(value: unknown) { const parsed = Number(stringValue(value).replace(/[^0-9]/g, "")); return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined; }
 function host(url: string) { try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return ""; } }
+
 
 
 

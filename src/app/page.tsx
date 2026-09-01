@@ -263,24 +263,32 @@ function persistedImageUrl(value: string) {
 }
 
 async function normalizeUploadImage(file: File) {
-  try {
-    const dataUrl = await readFileAsDataUrl(file);
-    const image = await loadImage(dataUrl);
-    const sourceWidth = image.naturalWidth || image.width;
-    const sourceHeight = image.naturalHeight || image.height;
-    const maxSize = 1600;
-    const scale = Math.min(1, maxSize / Math.max(sourceWidth, sourceHeight));
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.max(1, Math.round(sourceWidth * scale));
-    canvas.height = Math.max(1, Math.round(sourceHeight * scale));
-    const context = canvas.getContext("2d");
-    if (!context) return file;
-    context.drawImage(image, 0, 0, canvas.width, canvas.height);
-    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.86));
-    return blob ? new File([blob], (file.name || "product-image").replace(/\.[^.]+$/, "") + ".jpg", { type: "image/jpeg" }) : file;
-  } catch {
-    return file;
-  }
+  const dataUrl = await readFileAsDataUrl(file);
+  const image = await loadImage(dataUrl);
+  const sourceWidth = image.naturalWidth || image.width;
+  const sourceHeight = image.naturalHeight || image.height;
+  if (!sourceWidth || !sourceHeight) throw new Error("画像サイズを読み取れませんでした。スクショではなく写真を選ぶ場合は、写真アプリで一度編集保存してから試してください");
+  const maxSize = 1280;
+  const scale = Math.min(1, maxSize / Math.max(sourceWidth, sourceHeight));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.max(1, Math.round(sourceWidth * scale));
+  canvas.height = Math.max(1, Math.round(sourceHeight * scale));
+  const context = canvas.getContext("2d", { alpha: false });
+  if (!context) throw new Error("画像を変換できませんでした");
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  const blob = await canvasToJpegBlob(canvas);
+  if (!blob) throw new Error("画像をJPEGに変換できませんでした");
+  return new File([blob], "product-image.jpg", { type: "image/jpeg" });
+}
+
+async function canvasToJpegBlob(canvas: HTMLCanvasElement) {
+  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.82));
+  if (blob) return blob;
+  const dataUrl = canvas.toDataURL("image/jpeg", 0.82);
+  const response = await fetch(dataUrl);
+  return response.blob();
 }
 
 function readFileAsDataUrl(file: File) {
@@ -521,7 +529,7 @@ function ProductForm({ categories, currentType, initialCategoryId, product, allT
     try {
       const uploadFile = await normalizeUploadImage(file);
       const form = new FormData();
-      form.append("image", uploadFile, uploadFile.name || "product-image.jpg");
+      form.append("image", uploadFile, "product-image.jpg");
       const response = await fetch("/api/product-image", { method: "POST", body: form });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error ?? "画像を読み取れませんでした");
