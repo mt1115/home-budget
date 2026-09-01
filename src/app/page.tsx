@@ -263,17 +263,20 @@ function persistedImageUrl(value: string) {
 }
 
 async function normalizeUploadImage(file: File) {
-  if (["image/jpeg", "image/png", "image/webp"].includes(file.type)) return file;
   try {
     const dataUrl = await readFileAsDataUrl(file);
     const image = await loadImage(dataUrl);
+    const sourceWidth = image.naturalWidth || image.width;
+    const sourceHeight = image.naturalHeight || image.height;
+    const maxSize = 1600;
+    const scale = Math.min(1, maxSize / Math.max(sourceWidth, sourceHeight));
     const canvas = document.createElement("canvas");
-    canvas.width = image.naturalWidth || image.width;
-    canvas.height = image.naturalHeight || image.height;
+    canvas.width = Math.max(1, Math.round(sourceWidth * scale));
+    canvas.height = Math.max(1, Math.round(sourceHeight * scale));
     const context = canvas.getContext("2d");
     if (!context) return file;
-    context.drawImage(image, 0, 0);
-    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.88));
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.86));
     return blob ? new File([blob], (file.name || "product-image").replace(/\.[^.]+$/, "") + ".jpg", { type: "image/jpeg" }) : file;
   } catch {
     return file;
