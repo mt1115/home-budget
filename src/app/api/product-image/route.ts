@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 type ProductInfo = { name?: string; maker?: string; model?: string; price?: number; image?: string; shop?: string; url?: string; memo?: string };
-type DifyOutput = { manufacturer?: string; model?: string; name?: string; price?: number | string; memo?: string; [key: string]: unknown };
+type DifyOutput = { manufacturer?: string; maker?: string; model?: string; name?: string; price?: number | string; url?: string; image?: string; shop?: string; memo?: string; [key: string]: unknown };
 
 const DIFY_BASE_URL = process.env.DIFY_BASE_URL ?? "https://api.dify.ai/v1";
 const DIFY_IMAGE_VARIABLE = process.env.DIFY_IMAGE_VARIABLE ?? "image";
@@ -18,7 +18,7 @@ export async function POST(request: NextRequest) {
     const output = await runDifyWorkflow(uploadId);
     const product = normalizeDifyOutput(output);
     const query = buildSearchQuery(product);
-    const foundUrl = query ? await searchProductUrl(query, product) : "";
+    const foundUrl = product.url || (query ? await searchProductUrl(query, product) : "");
     if (foundUrl) {
       const siteProduct = await extractProductFromUrl(foundUrl);
       Object.assign(product, mergeProductInfo(product, siteProduct));
@@ -71,7 +71,7 @@ async function runDifyWorkflow(uploadFileId: string): Promise<DifyOutput> {
 }
 
 function normalizeDifyOutput(output: DifyOutput): ProductInfo {
-  const maker = stringValue(output.manufacturer);
+  const maker = stringValue(output.manufacturer) || stringValue(output.maker);
   const model = stringValue(output.model);
   const name = stringValue(output.name) || [maker, model].filter(Boolean).join(" ");
   return {
@@ -79,6 +79,9 @@ function normalizeDifyOutput(output: DifyOutput): ProductInfo {
     model,
     name,
     price: toPrice(output.price),
+    url: stringValue(output.url),
+    image: stringValue(output.image),
+    shop: stringValue(output.shop),
     memo: stringValue(output.memo),
   };
 }
@@ -201,6 +204,7 @@ function guessModel(text: string) { return text.match(/\b[A-Z]{1,5}[-_ ]?[A-Z0-9
 function stringValue(value: unknown) { return typeof value === "string" || typeof value === "number" ? String(value).trim() : ""; }
 function toPrice(value: unknown) { const parsed = Number(stringValue(value).replace(/[^0-9]/g, "")); return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined; }
 function host(url: string) { try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return ""; } }
+
 
 
 

@@ -241,6 +241,38 @@ function persistedImageUrl(value: string) {
   return value.startsWith("blob:") ? "" : value;
 }
 
+async function normalizeUploadImage(file: File) {
+  if (["image/jpeg", "image/png", "image/webp"].includes(file.type)) return file;
+  const dataUrl = await readFileAsDataUrl(file);
+  const image = await loadImage(dataUrl);
+  const canvas = document.createElement("canvas");
+  canvas.width = image.naturalWidth || image.width;
+  canvas.height = image.naturalHeight || image.height;
+  const context = canvas.getContext("2d");
+  if (!context) return file;
+  context.drawImage(image, 0, 0);
+  const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.88));
+  return blob ? new File([blob], file.name.replace(/\.[^.]+$/, "") + ".jpg", { type: "image/jpeg" }) : file;
+}
+
+function readFileAsDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error("画像ファイルを読み込めませんでした"));
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadImage(src: string) {
+  return new Promise<HTMLImageElement>((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("画像形式を読み込めませんでした。JPEGまたはPNGで試してください"));
+    image.src = src;
+  });
+}
+
 
 async function saveItemTags(itemId: string, householdId: string, tags: string[]) {
   if (!supabase) return "";
@@ -447,8 +479,9 @@ function ProductForm({ categories, currentType, initialCategoryId, product, allT
   async function fillFromImage(file: File) {
     setReading(true);
     setReadError("");
+    const uploadFile = await normalizeUploadImage(file);
     const form = new FormData();
-    form.append("image", file);
+    form.append("image", uploadFile, uploadFile.name || "product-image.jpg");
     try {
       const response = await fetch("/api/product-image", { method: "POST", body: form });
       const data = await response.json();
@@ -456,7 +489,7 @@ function ProductForm({ categories, currentType, initialCategoryId, product, allT
       applyInfo(data.product ?? {});
       if (data.product?.image) setImage(data.product.image);
     } catch (error) {
-      setReadError(error instanceof Error ? error.message : "画像を読み取れませんでした");
+      setReadError(error instanceof Error ? error.message : "画像を読み取れませんでした。別の画像形式で試してください");
     } finally { setReading(false); }
   }
   async function submit(event: FormEvent) {
@@ -470,7 +503,7 @@ function ProductForm({ categories, currentType, initialCategoryId, product, allT
     const imageForSave = persistedImageUrl(image) || "https://images.unsplash.com/photo-1556228453-efd6c1ff04f6?w=300&auto=format&fit=crop";
     await onSave({ categoryId, name: name.trim(), maker, model, price: priceNumber, url, shop, image: imageForSave, tags, memo, selected, favorite: selected });
   }
-  return <div className="fixed inset-0 z-50 bg-black/20 px-5 py-8" onClick={onClose}><form className="mx-auto max-h-[calc(100vh-4rem)] w-full max-w-sm space-y-3 overflow-y-auto rounded-3xl bg-white p-5 [scrollbar-gutter:stable] shadow-2xl" onClick={(e) => e.stopPropagation()} onSubmit={submit}><div className="mb-2 flex items-center justify-between"><h2 className="text-lg font-semibold">{product ? label.editProduct : label.manual}</h2><button type="button" className="grid h-9 w-9 place-items-center rounded-full hover:bg-zinc-100" onClick={onClose}><X size={20} /></button></div><label className="flex cursor-pointer items-center justify-center gap-2 rounded-2xl border border-dashed border-emerald-700 px-4 py-4 text-sm font-semibold text-emerald-700 hover:bg-emerald-50"><ImagePlus size={18} />{label.autoFromImage}<input className="hidden" type="file" accept="image/*" onChange={(e) => { const file = e.target.files?.[0]; if (file) void fillFromImage(file); }} /></label><select className="h-11 w-full rounded-xl border border-zinc-200 px-3" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>{availableCategories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select><Field placeholder={label.productName} value={name} onChange={setName} /><Field placeholder={label.maker} value={maker} onChange={setMaker} /><Field placeholder={label.model} value={model} onChange={setModel} /><PriceField value={price} onChange={setPrice} /><div className="flex gap-2"><Field placeholder="URL" value={url} onChange={setUrl} /><button type="button" className="h-11 shrink-0 rounded-xl border border-emerald-700 px-3 text-xs font-semibold text-emerald-700 hover:bg-emerald-50" onClick={fillFromUrl}>{reading ? label.reading : label.autoFromUrl}</button></div><Field placeholder={label.shop} value={shop} onChange={setShop} /><Field placeholder={label.imageUrl} value={persistedImageUrl(image)} onChange={setImage} />{readError ? <p className="rounded-xl bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">{readError}</p> : null}<div className="space-y-2"><select className="h-11 w-full rounded-xl border border-zinc-200 px-3 text-sm" value={tagSelect} onChange={(e) => { addTag(e.target.value); setTagSelect(""); }}><option value="">{label.tagCsv}</option>{tagOptions.map((tag) => <option key={tag} value={tag}>{tag}</option>)}</select>{addingTag ? <div className="flex gap-2"><input className="h-10 min-w-0 flex-1 rounded-xl border border-zinc-200 px-3 text-sm outline-none focus:border-emerald-600" placeholder={label.newTag} value={newTag} onChange={(e) => setNewTag(e.target.value)} /><button type="button" className="rounded-xl bg-zinc-900 px-3 text-xs font-semibold text-white" onClick={() => { addTag(newTag.trim()); setNewTag(""); setAddingTag(false); }}>{label.addTag}</button></div> : <button type="button" className="inline-flex h-8 items-center rounded-full border border-emerald-700 px-3 text-xs font-semibold text-emerald-700 hover:bg-emerald-50" onClick={() => setAddingTag(true)}>{label.addTag}</button>}<div className="flex flex-wrap gap-2">{tags.map((tag) => <button type="button" key={tag} className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700" onClick={() => setTags((current) => current.filter((item) => item !== tag))}>{tag}<span className="ml-1">x</span></button>)}</div></div><textarea className="min-h-20 w-full rounded-xl border border-zinc-200 px-3 py-2 outline-none focus:border-emerald-600" placeholder={label.memo} value={memo} onChange={(e) => setMemo(e.target.value)} /><label className="flex items-center gap-2 text-sm font-semibold text-zinc-600"><input type="checkbox" checked={selected} onChange={(e) => setSelected(e.target.checked)} />{label.markSelected}</label><button className="h-11 w-full rounded-xl bg-zinc-900 text-sm font-semibold text-white hover:bg-emerald-700">{label.save}</button></form></div>;
+  return <div className="fixed inset-0 z-50 bg-black/20 px-5 py-8" onClick={onClose}><form className="mx-auto max-h-[calc(100vh-4rem)] w-full max-w-sm space-y-3 overflow-y-auto rounded-3xl bg-white p-5 [scrollbar-gutter:stable] shadow-2xl" onClick={(e) => e.stopPropagation()} onSubmit={submit}><div className="mb-2 flex items-center justify-between"><h2 className="text-lg font-semibold">{product ? label.editProduct : label.manual}</h2><button type="button" className="grid h-9 w-9 place-items-center rounded-full hover:bg-zinc-100" onClick={onClose}><X size={20} /></button></div><label className="flex cursor-pointer items-center justify-center gap-2 rounded-2xl border border-dashed border-emerald-700 px-4 py-4 text-sm font-semibold text-emerald-700 hover:bg-emerald-50"><ImagePlus size={18} />{label.autoFromImage}<input className="hidden" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" onChange={(e) => { const file = e.target.files?.[0]; if (file) void fillFromImage(file); }} /></label><select className="h-11 w-full rounded-xl border border-zinc-200 px-3" value={categoryId} onChange={(e) => setCategoryId(e.target.value)}>{availableCategories.map((category) => <option key={category.id} value={category.id}>{category.name}</option>)}</select><Field placeholder={label.productName} value={name} onChange={setName} /><Field placeholder={label.maker} value={maker} onChange={setMaker} /><Field placeholder={label.model} value={model} onChange={setModel} /><PriceField value={price} onChange={setPrice} /><div className="flex gap-2"><Field placeholder="URL" value={url} onChange={setUrl} /><button type="button" className="h-11 shrink-0 rounded-xl border border-emerald-700 px-3 text-xs font-semibold text-emerald-700 hover:bg-emerald-50" onClick={fillFromUrl}>{reading ? label.reading : label.autoFromUrl}</button></div><Field placeholder={label.shop} value={shop} onChange={setShop} /><Field placeholder={label.imageUrl} value={persistedImageUrl(image)} onChange={setImage} />{readError ? <p className="rounded-xl bg-red-50 px-3 py-2 text-xs font-semibold text-red-700">{readError}</p> : null}<div className="space-y-2"><select className="h-11 w-full rounded-xl border border-zinc-200 px-3 text-sm" value={tagSelect} onChange={(e) => { addTag(e.target.value); setTagSelect(""); }}><option value="">{label.tagCsv}</option>{tagOptions.map((tag) => <option key={tag} value={tag}>{tag}</option>)}</select>{addingTag ? <div className="flex gap-2"><input className="h-10 min-w-0 flex-1 rounded-xl border border-zinc-200 px-3 text-sm outline-none focus:border-emerald-600" placeholder={label.newTag} value={newTag} onChange={(e) => setNewTag(e.target.value)} /><button type="button" className="rounded-xl bg-zinc-900 px-3 text-xs font-semibold text-white" onClick={() => { addTag(newTag.trim()); setNewTag(""); setAddingTag(false); }}>{label.addTag}</button></div> : <button type="button" className="inline-flex h-8 items-center rounded-full border border-emerald-700 px-3 text-xs font-semibold text-emerald-700 hover:bg-emerald-50" onClick={() => setAddingTag(true)}>{label.addTag}</button>}<div className="flex flex-wrap gap-2">{tags.map((tag) => <button type="button" key={tag} className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-700" onClick={() => setTags((current) => current.filter((item) => item !== tag))}>{tag}<span className="ml-1">x</span></button>)}</div></div><textarea className="min-h-20 w-full rounded-xl border border-zinc-200 px-3 py-2 outline-none focus:border-emerald-600" placeholder={label.memo} value={memo} onChange={(e) => setMemo(e.target.value)} /><label className="flex items-center gap-2 text-sm font-semibold text-zinc-600"><input type="checkbox" checked={selected} onChange={(e) => setSelected(e.target.checked)} />{label.markSelected}</label><button className="h-11 w-full rounded-xl bg-zinc-900 text-sm font-semibold text-white hover:bg-emerald-700">{label.save}</button></form></div>;
 }
 function Field({ placeholder, value, onChange, inputMode }: { placeholder: string; value: string; onChange: (value: string) => void; inputMode?: "numeric" }) { return <input className="h-11 w-full rounded-xl border border-zinc-200 px-3 outline-none focus:border-emerald-600" placeholder={placeholder} value={value} inputMode={inputMode} onChange={(e) => onChange(e.target.value)} />; }
 function PriceField({ value, onChange }: { value: string; onChange: (value: string) => void }) { return <div className="flex h-11 items-center rounded-xl border border-zinc-200 bg-white px-3 focus-within:border-emerald-600"><input className="min-w-0 flex-1 outline-none" placeholder={label.price} value={value} inputMode="numeric" onChange={(e) => onChange(e.target.value)} /><span className="ml-2 text-sm font-semibold text-zinc-500">円</span></div>; }
